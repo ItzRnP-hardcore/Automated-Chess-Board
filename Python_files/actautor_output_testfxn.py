@@ -36,36 +36,27 @@ __all__ = [
 import RPi.GPIO as GPIO
 import time
 import re
-
 # --- GPIO Pin Definitions ---
-MOTOR1_STEP = 33  # Motor A Step (e.g., GPIO6 on BOARD numbering)
-MOTOR1_DIR  = 31  # Motor A Direction (e.g., GPIO13)
-MOTOR2_STEP = 37  # Motor B Step (e.g., GPIO19)
-MOTOR2_DIR  = 35  # Motor B Direction (e.g., GPIO26)
-MOTOR_ENAB  = 36
-
+MOTOR1_STEP = 13  # Motor A Step (e.g., GPIO6 on BOARD numbering)
+MOTOR1_DIR  =  6  # Motor A Direction (e.g., GPIO13)
+MOTOR2_STEP = 26  # Motor B Step (e.g., GPIO19)
+MOTOR2_DIR  = 19  # Motor B Direction (e.g., GPIO26)
+MOTOR_ENAB  = 16
+MAGNET_PIN  = 20  
 # Limit switches for homing
-LIMIT_X = 29  # Horizontal limit switch (for X axis)
-LIMIT_Y = 32  # Vertical limit switch (for Y axis)
+LIMIT_X =  5  # Horizontal limit switch (for X axis)
+LIMIT_Y = 12  # Vertical limit switch (for Y axis)
 
 # --- Global Configuration ---
-HOME_X_OFFSET = 500  # Homing offset for the X axis in mm
-HOME_Y_OFFSET = 0    # Homing offset for the Y axis in mm (50cm = 500mm)
+HOME_X_OFFSET = 520  # Homing offset for the X axis in mm
+HOME_Y_OFFSET = 20    # Homing offset for the Y axis in mm (50cm = 500mm)
 SQUARE_SIZE = 40     # Chess square size in mm
 HALF_SQUARE = SQUARE_SIZE / 2  # 20 mm
 
-a1_calibration = None
+a1_calibration = (40, 0)
 
 # --- GPIO Setup ---
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(MOTOR1_STEP, GPIO.OUT)
-GPIO.setup(MOTOR1_DIR, GPIO.OUT)
-GPIO.setup(MOTOR2_STEP, GPIO.OUT)
-GPIO.setup(MOTOR2_DIR, GPIO.OUT)
-GPIO.setup(MOTOR_ENAB, GPIO.OUT)
 
-GPIO.setup(LIMIT_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(LIMIT_Y, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # --- Chess and Position Functions ---
 def chess_square_to_xy(square):
@@ -79,8 +70,8 @@ def chess_square_to_xy(square):
     rank = int(square[1])
     col = ord(file) - ord('a')
     row = rank - 1
-    x = col * SQUARE_SIZE + HALF_SQUARE
-    y = row * SQUARE_SIZE + HALF_SQUARE
+    x =  a1_calibration[0] + col * SQUARE_SIZE + HALF_SQUARE
+    y = a1_calibration[1] + row * SQUARE_SIZE + HALF_SQUARE
     return (x, y)
 
 # --- Position Tracking ---
@@ -89,15 +80,12 @@ def get_current_position():
     return current_position
 
 # --- electromagnet Functions ---
-def magnet(power = False):
+def magnet():
+    GPIO.output(MAGNET_PIN, GPIO.LOW)
 
-    # add electromagnet functionality
-    if(power):
-        print("grabbing chess piece...")
-    else:
-        print("releasing chess piece...")
-
-
+def magnet_off():
+    GPIO.output(MAGNET_PIN, GPIO.HIGH)
+    
 # --- Motor Movement Logic ---
 def move_to_xy(target_xy):
     """
@@ -109,8 +97,8 @@ def move_to_xy(target_xy):
     dy = target_xy[1] - current_position[1]
 
     # CoreXY step calculations:
-    dA = dx + dy
-    dB = dy - dx
+    dA = dy - dx
+    dB = dx + dy
 
     steps_per_mm = 5  # Adjust based on your motor resolution
     steps_A = int(dA * steps_per_mm)
@@ -171,7 +159,7 @@ def move_piece_with_stepper(move_uci, special=False):
         print("Moving to the start square...")
         move_to_xy(start_xy)
 
-    magnet(power=True)
+    magnet()
 
     if special:
         # Determine directions for half-square moves.
@@ -202,7 +190,7 @@ def move_piece_with_stepper(move_uci, special=False):
         # --- NORMAL MOVE (DIAGONAL) ---
         print("Moving piece directly from start to end square (diagonal).")
         move_to_xy(end_xy)
-    magnet()
+    magnet_off()
     print(f"Piece moved. Current position is now: {current_position}")
 
 def capture_move(capturing_uci, captured_dest_square):
@@ -338,8 +326,10 @@ def home_y(delay=0.002):
 def home_corexy():
     global current_position
     print("Starting CoreXY homing process...")
+    GPIO.output(MOTOR_ENAB, GPIO.LOW)
     home_x()
     home_y()
+    GPIO.output(MOTOR_ENAB, GPIO.HIGH)
     current_position = (HOME_X_OFFSET, HOME_Y_OFFSET)
     print(f"CoreXY homing complete. Current position set to {current_position}.")
 
@@ -349,9 +339,31 @@ def calibrate_a1(new_a1_position):
     a1_calibration = new_a1_position
     current_position = new_a1_position
     print(f"Calibrated A1 to {a1_calibration}")
-
-# --- UCI Input ---
+def initialise():
+    GPIO.cleanup()
+    GPIO.cleanup()
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(MOTOR1_STEP, GPIO.OUT)
+    GPIO.setup(MOTOR1_DIR, GPIO.OUT)
+    GPIO.setup(MOTOR2_STEP, GPIO.OUT)
+    GPIO.setup(MOTOR2_DIR, GPIO.OUT)
+    GPIO.setup(MOTOR_ENAB, GPIO.OUT)
+    GPIO.setup(MAGNET_PIN, GPIO.OUT)
+    GPIO.setup(LIMIT_X, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(LIMIT_Y, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    home_corexy()
 def get_uci_move():
     uci_pattern = re.compile(r"^[a-h][1-8][a-h][1-8]$")
     move = input("Enter a move in UCI format (e.g., e2e4): ").strip().lower()
     return move if uci_pattern.match(move) else None
+
+"""def main():
+    initialise()
+    while(True):
+        
+        move = get_uci_move()
+        move_piece_with_stepper(move)
+    
+
+if __name__ == "__main__":
+    main()"""
